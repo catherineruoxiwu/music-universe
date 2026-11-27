@@ -53,6 +53,7 @@ const ICONS = {
   minus: '<path d="M5 12h14"/>',
   fit: '<path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/><circle cx="12" cy="12" r="2.2"/>',
   target: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+  import: '<path d="M12 15V4M7 8.5l5-5 5 5M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14"/>',
 } as const;
 
 export type IconName = keyof typeof ICONS;
@@ -74,6 +75,35 @@ export function iconButton(name: IconName, label: string, onClick: (event: Mouse
 /** A pill that is either on or off. */
 export function chip(label: string, selected: boolean, onClick: () => void): HTMLButtonElement {
   return h('button', { class: 'chip', type: 'button', 'aria-pressed': String(selected), onClick }, label);
+}
+
+let pressing = false;
+const deferred = new Set<() => void>();
+if (typeof window !== 'undefined') {
+  window.addEventListener('pointerdown', () => (pressing = true), true);
+  const released = () => {
+    pressing = false;
+    // A timer, so that the click this release may be about to produce is delivered first.
+    window.setTimeout(() => {
+      if (pressing) return;
+      const redraws = [...deferred];
+      deferred.clear();
+      for (const redraw of redraws) redraw();
+    }, 0);
+  };
+  for (const type of ['pointerup', 'pointercancel', 'blur']) window.addEventListener(type, released, true);
+}
+
+/**
+ * Runs `redraw` now or, while something is being pressed, once it has been let go.
+ *
+ * For redraws that nobody asked for, such as the ones that follow each song looked up in the
+ * background: replacing a button between the press and the release would swallow the click.
+ * Asking again for the same function before it has run does not run it twice.
+ */
+export function betweenPresses(redraw: () => void): void {
+  if (pressing) deferred.add(redraw);
+  else redraw();
 }
 
 let toastTimer = 0;

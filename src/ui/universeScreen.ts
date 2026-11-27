@@ -1,10 +1,10 @@
 import type { Insets } from '../graph/camera';
-import { GraphVisibility, compareText, isDefaultFilter, linkedWorks, type GraphEdge, type GraphNode } from '../graph/graph';
+import { GraphVisibility, compareText, isDefaultFilter, linkedWorks, type GraphEdge, type GraphFilter, type GraphNode, type UniverseGraph } from '../graph/graph';
 import { UniverseView, type Hover, type Selection } from '../graph/universeView';
 import { GRAPHED, roleName, rolePlural, type Role } from '../model/types';
 import { links, type App } from './app';
-import { ROLE_COLORS, creatorRow, creditsOn, describeFilter, itemSubtitle, plural, workRow, works } from './describe';
-import { chip, h, icon, iconButton, setChildren } from './dom';
+import { ROLE_COLORS, creatorRow, creditsOn, describeFilter, describeProgress, itemSubtitle, libraryPhrase, plural, workRow, works } from './describe';
+import { betweenPresses, chip, h, icon, iconButton, setChildren } from './dom';
 
 const SEARCH_LIMIT = 40;
 const EDGE_MARGIN = 24;
@@ -77,13 +77,10 @@ export function createUniverseScreen(app: App) {
 
   const tooltip = h('div', { class: 'tooltip', hidden: true });
   const card = h('aside', { class: 'detail-card', hidden: true, 'aria-live': 'polite' });
-  const empty = h(
-    'div',
-    { class: 'empty-state', hidden: true },
-    h('h2', null, 'Nothing to connect yet'),
-    h('p', null, 'None of the works being analysed has credits to draw. Include more works in Library.'),
-    h('a', { class: 'button filled', href: links.library }, 'Open Library'),
-  );
+  const emptyTitle = h('h2');
+  const emptyText = h('p');
+  const emptyLink = h('a', { class: 'button filled' });
+  const empty = h('div', { class: 'empty-state', hidden: true }, emptyTitle, emptyText, emptyLink);
 
   // The header and footer lie over the map; the card takes the right of the space between them
   // on a wide window and rises from the bottom on a narrow one.
@@ -149,13 +146,28 @@ export function createUniverseScreen(app: App) {
     });
   }
 
+  /** What the card was last drawn for, and what it then said. */
+  let cardFor = '';
+
   function renderCard(): void {
-    const { graph, data } = store.snapshot;
     card.hidden = selection === null;
-    if (selection === null) {
-      card.replaceChildren();
-      return;
-    }
+    const drawn = h('div');
+    drawCard(drawn);
+    const drawnFor = JSON.stringify(selection);
+    const sameSelection = drawnFor === cardFor;
+    // Says the same as before, as it will after most lookups of other songs: keep the elements
+    // that are there, with their focus and scroll position.
+    if (sameSelection && drawn.textContent === card.textContent) return;
+    const scrolled = sameSelection ? (card.querySelector('.card-list')?.scrollTop ?? 0) : 0;
+    cardFor = drawnFor;
+    card.replaceChildren(...drawn.childNodes);
+    const list = card.querySelector('.card-list');
+    if (list) list.scrollTop = scrolled;
+  }
+
+  function drawCard(card: HTMLElement): void {
+    const { graph, data } = store.snapshot;
+    if (selection === null) return;
     const close = iconButton('close', 'Close', () => select(null, false));
     const header = (title: string, lines: string[]) =>
       h('header', { class: 'card-header' }, h('div', null, h('h2', null, title), lines.map((line) => h('p', null, line))), close);
@@ -319,43 +331,82 @@ export function createUniverseScreen(app: App) {
   // --- rendering ----------------------------------------------------------------------------------
   let shownGeneration = -1;
   let shownFilter = store.filter;
+  let chipsFor: GraphFilter | null = null;
 
   function render(): void {
     const { snapshot, filter } = store;
-    const graph = snapshot.graph;
     view.setSnapshot(snapshot);
     view.setFilter(filter);
     // While a layout settles, only positions change. Leave the controls alone then, so that a
     // press that lands on one in the meantime is not lost.
     if (snapshot.generation === shownGeneration && filter === shownFilter) return;
+    // A change of filter is the user's doing and shows at once. Anything else may be the result
+    // of a song looked up in the background, and waits for a press that is under way.
+    if (filter !== shownFilter) renderControls();
+    else betweenPresses(renderControls);
+  }
+
+  /** The line under the title: whose library this is, how far its import is, or what the filter shows. */
+  function renderSubtitle(): void {
+    const status = store.status;
+    const importing = store.showing === 'mine' && status !== null && status.counts.remaining > 0;
+    subtitle.textContent = !isDefaultFilter(store.filter)
+      ? describeFilter(store.filter)
+      : importing
+        ? `Your library · ${describeProgress(status)}`
+        : `The people behind ${libraryPhrase(store.showing)}`;
+
+    if (importing) {
+      emptyTitle.textContent = 'Looking up your songs';
+      emptyText.textContent = 'People appear here as soon as the first credits are found.';
+      emptyLink.textContent = 'See progress';
+      emptyLink.href = links.import;
+    } else {
+      emptyTitle.textContent = 'Nothing to connect yet';
+      emptyText.textContent = 'None of the works being analysed has credits to draw. Include more works in Library.';
+      emptyLink.textContent = 'Open Library';
+      emptyLink.href = links.library;
+    }
+  }
+
+  function renderControls(): void {
+    const { snapshot, filter } = store;
+    const graph = snapshot.graph;
     shownGeneration = snapshot.generation;
     shownFilter = filter;
     const visibility = GraphVisibility.compute(graph, filter);
     const filtered = !isDefaultFilter(filter);
 
-    subtitle.textContent = filtered ? describeFilter(filter) : 'The people behind a demo library';
+    renderSubtitle();
 
-    const roleChip = (label: string, role: Role | null) => chip(label, filter.role === role, () => store.setFilter({ ...filter, role }));
-    setChildren(
-      roleChips,
-      roleChip('All', null),
-      GRAPHED.map((role) => roleChip(rolePlural(role), role)),
-      h('span', { class: 'chip-divider', 'aria-hidden': 'true' }),
-      chip('Shared Only', filter.sharedOnly, () => store.setFilter({ ...filter, sharedOnly: !filter.sharedOnly })),
-    );
-
-    setChildren(
-      legend,
-      GRAPHED.map((role) =>
-        h(
-          'span',
-          { class: `legend-item ${filter.role !== null && filter.role !== role ? 'muted' : ''}` },
-          h('span', { class: 'dot', style: { '--dot': ROLE_COLORS[role] } }),
-          roleName(role),
+    // The chips and the legend depend on the filter alone.
+    if (filter !== chipsFor) {
+      chipsFor = filter;
+      const roleChip = (label: string, role: Role | null) => chip(label, filter.role === role, () => store.setFilter({ ...filter, role }));
+      setChildren(
+        roleChips,
+        roleChip('All', null),
+        GRAPHED.map((role) => roleChip(rolePlural(role), role)),
+        h('span', { class: 'chip-divider', 'aria-hidden': 'true' }),
+        chip('Shared Only', filter.sharedOnly, () => store.setFilter({ ...filter, sharedOnly: !filter.sharedOnly })),
+      );
+      setChildren(
+        legend,
+        GRAPHED.map((role) =>
+          h(
+            'span',
+            { class: `legend-item ${filter.role !== null && filter.role !== role ? 'muted' : ''}` },
+            h('span', { class: 'dot', style: { '--dot': ROLE_COLORS[role] } }),
+            roleName(role),
+          ),
         ),
-      ),
-    );
+      );
+    }
 
+    renderTotals(graph, visibility, filtered);
+  }
+
+  function renderTotals(graph: UniverseGraph, visibility: GraphVisibility, filtered: boolean): void {
     // The three numbers under the map always describe what the current filter shows.
     const worksLabel = filtered ? 'Linked works' : graph.stats.albums === 0 ? 'Songs' : graph.stats.songs === 0 ? 'Albums' : 'Works';
     const figures: [number, string][] = [
@@ -379,6 +430,7 @@ export function createUniverseScreen(app: App) {
   }
 
   store.subscribe(render);
+  store.subscribeProgress(renderSubtitle);
   render();
 
   return {

@@ -63,6 +63,9 @@ export interface LibraryItem {
   artist: string;
   album?: string;
   year?: number;
+  durationMs?: number;
+  /** When it was added to the source library, in milliseconds since the epoch. */
+  addedAt?: number;
   matchStatus: MatchStatus;
   matchMethod?: string;
   matchConfidence?: number;
@@ -71,6 +74,8 @@ export interface LibraryItem {
   creditsStatus: CreditsStatus;
   recordingMbid?: string;
   releaseMbid?: string;
+  /** Why the last lookup failed, when it did. */
+  lastError?: string;
   /** False when the user has taken this work out of the analysis. */
   included: boolean;
 }

@@ -68,7 +68,7 @@ export function createSharePage(app: App): Page {
       text: {
         title: options.showNickname && name !== '' ? `${name}’s Music Universe` : 'A Music Universe',
         subtitle:
-          `${filter.role ? rolePlural(filter.role) : 'Everyone'} credited on the music in a demo library` +
+          `${filter.role ? rolePlural(filter.role) : 'Everyone'} credited on the music in ${store.showing === 'mine' ? 'my library' : 'a demo library'}` +
           (filter.sharedOnly ? ' · shared connections only' : ''),
         worksLabel: !isDefaultFilter(filter) ? 'Linked works' : stats.albums === 0 ? 'Songs' : stats.songs === 0 ? 'Albums' : 'Works',
         coverage: `Credits found for ${withCredits} of ${analysed.length} works · Data: MusicBrainz`,

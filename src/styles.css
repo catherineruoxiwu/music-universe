@@ -179,11 +179,51 @@ button:disabled {
   stroke-width: 2.3;
 }
 
-.nav-note {
+/* Under the tabs: whose library is on show, and how far along an import is. */
+.nav-library {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-top: auto;
-  padding: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--outline);
+  border-radius: 16px;
+  color: var(--text);
+  text-decoration: none;
+  transition: background-color 0.15s;
+}
+
+.nav-library:hover,
+.nav-library[aria-current] {
+  background: var(--surface);
+}
+
+.nav-library .icon {
+  width: 22px;
+  height: 22px;
+  color: var(--accent);
+}
+
+.nav-library.busy .icon {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.nav-library-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  font-size: 14px;
+}
+
+.nav-library-text span {
+  color: var(--text-secondary);
   font-size: 12px;
-  color: var(--text-tertiary);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
 }
 
 .main {
@@ -559,6 +599,28 @@ button:disabled {
   border-bottom: 1px solid var(--outline);
 }
 
+/* A line above a list saying whose library it is, with one thing to do about it. */
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+  padding: 6px 6px 6px 20px;
+  border-bottom: 1px solid var(--outline);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.list-more {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px 20px;
+}
+
 /* --- lists --------------------------------------------------------------------------------------- */
 
 .row {
@@ -714,6 +776,86 @@ button.row-main:focus-visible {
 
 .card .button {
   justify-self: start;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* --- importing ----------------------------------------------------------------------------------- */
+
+.steps {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.steps strong {
+  font-weight: 650;
+}
+
+.drop-zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 28px 20px;
+  border: 1.5px dashed var(--outline);
+  border-radius: 16px;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
+}
+
+.drop-zone.over {
+  border-color: var(--accent);
+  background: rgb(185 163 245 / 0.08);
+}
+
+.problem {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgb(244 183 106 / 0.1);
+  color: #f4b76a;
+  font-size: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.select.wide,
+.select.wide select {
+  width: 100%;
+  min-width: 0;
+}
+
+.select.wide select {
+  padding-block: 9px;
+  border-radius: 12px;
+  color: var(--text);
+  text-overflow: ellipsis;
+}
+
+.bar-track.progress {
+  height: 8px;
+}
+
+.bar-track.progress .bar-fill {
+  background: var(--accent);
+  transition: width 0.4s;
+}
+
+.progress-summary {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .empty-state {
@@ -1217,8 +1359,13 @@ button.bar:hover .bar-label {
   /* Without its name the brand is just a second copy of the Universe tab's icon. */
   .brand,
   .nav-link span,
-  .nav-note {
+  .nav-library-text {
     display: none;
+  }
+
+  .nav-library {
+    padding: 13px;
+    border-radius: 50%;
   }
 
   .nav-link {
@@ -1285,6 +1432,11 @@ button.bar:hover .bar-label {
 
   .nav-link span {
     display: block;
+  }
+
+  /* Five tabs fill the bar; the Library page leads to importing here. */
+  .nav-library {
+    display: none;
   }
 
   .nav-link:hover {

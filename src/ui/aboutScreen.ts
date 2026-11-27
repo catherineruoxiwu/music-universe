@@ -1,6 +1,7 @@
-import type { App, Page } from './app';
+import { links, type App, type Page } from './app';
 import { plural } from './describe';
 import { confirmDialog, h, setChildren, toast } from './dom';
+import { deleteLibraryButton } from './importScreen';
 
 /** What this site is, what it keeps in the browser, and where its data comes from. */
 export function createAboutPage(app: App): Page {
@@ -9,7 +10,7 @@ export function createAboutPage(app: App): Page {
   const element = h(
     'div',
     { class: 'page' },
-    h('header', { class: 'page-header' }, h('div', { class: 'page-title' }, h('h1', null, 'About'), h('p', { class: 'subtitle' }, 'Music Universe, web demo'))),
+    h('header', { class: 'page-header' }, h('div', { class: 'page-title' }, h('h1', null, 'About'), h('p', { class: 'subtitle' }, 'Music Universe on the web'))),
     body,
   );
 
@@ -19,6 +20,8 @@ export function createAboutPage(app: App): Page {
   function render(): void {
     const data = store.snapshot.data;
     const excluded = data.items.length - data.analysedItems.length;
+    const mine = store.showing === 'mine';
+    const imported = store.status;
     const reset = h(
       'button',
       {
@@ -28,7 +31,7 @@ export function createAboutPage(app: App): Page {
         onClick: async () => {
           const confirmed = await confirmDialog(
             'Reset your changes?',
-            'Every excluded work is included again, and the nickname and the saved layout are forgotten. The demo library itself is not changed. This can’t be undone.',
+            'Every excluded work is included again, and the nickname and the saved layout are forgotten. The library itself is not changed. This can’t be undone.',
             'Reset',
           );
           if (!confirmed) return;
@@ -53,8 +56,9 @@ export function createAboutPage(app: App): Page {
         h(
           'p',
           null,
-          `This site is a demo. It shows one fixed sample library of ${plural(data.items.length, 'work')}, not yours: it cannot connect to a music service or import anything. The credits were looked up on MusicBrainz ahead of time and are bundled with the page.`,
+          'It opens on a small sample library whose credits were looked up on MusicBrainz ahead of time and are bundled with the page. You can also import your own from Apple Music, as a file exported by the Music app; this page then looks each song up on MusicBrainz itself. It cannot sign in to a music service.',
         ),
+        h('a', { class: 'button tonal', href: links.import }, imported ? 'Your library' : 'Import your library'),
       ),
       h(
         'section',
@@ -63,8 +67,11 @@ export function createAboutPage(app: App): Page {
         h(
           'p',
           null,
-          `${plural(data.items.length, 'work')}, ${plural(data.creators.size, 'creator')} and ${plural(data.credits.length, 'credit')} are loaded with the page.` +
-            (excluded > 0 ? ` You have excluded ${plural(excluded, 'work')} from analysis.` : ''),
+          (mine
+            ? `Your library is on show: ${plural(data.items.length, 'work')}, ${plural(data.creators.size, 'creator')} and ${plural(data.credits.length, 'credit')}, kept in this browser’s storage.`
+            : `The demo library is on show: ${plural(data.items.length, 'work')}, ${plural(data.creators.size, 'creator')} and ${plural(data.credits.length, 'credit')}, loaded with the page.`) +
+            (excluded > 0 ? ` You have excluded ${plural(excluded, 'work')} from analysis.` : '') +
+            (imported && !mine ? ` Your imported library of ${plural(imported.counts.total, 'song')} is kept in this browser’s storage as well.` : ''),
         ),
         action(
           'Reset Universe layout',
@@ -83,6 +90,7 @@ export function createAboutPage(app: App): Page {
           ),
         ),
         action('Reset my changes', 'Includes every work again and forgets the nickname and saved layout.', reset),
+        imported ? action('Delete my library', 'Removes the imported songs and their credits from this browser.', deleteLibraryButton(app)) : null,
       ),
       h(
         'section',
@@ -92,6 +100,11 @@ export function createAboutPage(app: App): Page {
           'p',
           null,
           'There is no account, no server of ours and no analytics. Which works you exclude, the nickname for a poster and the layout of the map are kept in this browser’s storage only, and posters are drawn on your device.',
+        ),
+        h(
+          'p',
+          null,
+          'A library file you import is read by this page on your device and is not uploaded. To find credits, the title, artist and album of each imported song are sent from your browser to MusicBrainz, which, like any web service, also sees your IP address. Nothing else in the file leaves your device. The imported songs and what was found for them stay in this browser until you delete them.',
         ),
         h('p', null, 'The page itself is served by GitHub Pages, which, like any web host, sees the request for it.'),
       ),

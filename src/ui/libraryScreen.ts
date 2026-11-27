@@ -1,19 +1,27 @@
 import { compareText } from '../graph/graph';
 import type { LibraryItem } from '../model/types';
 import { links, type App, type Page } from './app';
-import { initialOf, matchStatus, plural, row, workRow, works } from './describe';
+import { needsLookup } from '../enrich/enricher';
+import { describeProgress, initialOf, libraryPhrase, matchStatus, plural, row, workRow, works } from './describe';
 import { chip, h, icon, openMenu, setChildren, toast } from './dom';
 
 type Tab = 'songs' | 'albums' | 'artists';
-type Sort = 'title' | 'artist' | 'year';
+type Sort = 'title' | 'artist' | 'year' | 'recent';
 
 const STATUSES = {
   all: { label: 'Any status', accepts: (_: LibraryItem) => true },
   matched: { label: 'Matched', accepts: (item: LibraryItem) => item.matchStatus === 'MATCHED' && item.creditsStatus === 'FETCHED' },
   noCredits: { label: 'No credits listed', accepts: (item: LibraryItem) => item.matchStatus === 'MATCHED' && item.creditsStatus === 'EMPTY' },
+  review: { label: 'Needs review', accepts: (item: LibraryItem) => item.matchStatus === 'LOW_CONFIDENCE' },
+  unmatched: { label: 'Not matched', accepts: (item: LibraryItem) => item.matchStatus === 'UNMATCHED' },
+  failed: { label: 'Lookup failed', accepts: (item: LibraryItem) => item.matchStatus === 'FAILED' || (item.matchStatus === 'MATCHED' && item.creditsStatus === 'FAILED') },
+  waiting: { label: 'Waiting', accepts: needsLookup },
   excluded: { label: 'Excluded', accepts: (item: LibraryItem) => !item.included },
 } as const;
-type Status = keyof typeof STATUSES;
+export type Status = keyof typeof STATUSES;
+
+/** A long library is listed a part at a time; drawing thousands of rows at once makes the page crawl. */
+const PAGE_SIZE = 200;
 
 interface Query {
   tab: Tab;
@@ -29,6 +37,12 @@ interface Query {
 // Kept for the visit, so that coming back from a work finds the list as it was left.
 const query: Query = { tab: 'songs', text: '', sort: 'title', status: 'all', decade: null, artist: null };
 
+/** Opens the Library's songs narrowed to one status. */
+export function showLibraryStatus(app: App, status: Status): void {
+  Object.assign(query, { tab: 'songs', text: '', status, decade: null, artist: null });
+  app.navigate(links.library);
+}
+
 const lower = (text: string) => text.toLowerCase();
 const decadeOf = (item: LibraryItem) => (item.year === undefined ? null : Math.floor(item.year / 10) * 10);
 
@@ -37,6 +51,12 @@ export function createLibraryPage(app: App): Page {
   const { store } = app;
 
   const summary = h('p', { class: 'subtitle' });
+  const banner = h('div', { class: 'banner' });
+  /** How many rows of the current list are drawn. */
+  let limit = PAGE_SIZE;
+  let shownControls = '';
+  let shownRows: unknown[] = [];
+  let shownBanner = '';
   const searchInput = h('input', {
     class: 'search-input',
     type: 'search',
@@ -52,6 +72,7 @@ export function createLibraryPage(app: App): Page {
 
   searchInput.addEventListener('input', () => {
     query.text = searchInput.value;
+    limit = PAGE_SIZE;
     renderList();
   });
 
@@ -65,13 +86,55 @@ export function createLibraryPage(app: App): Page {
       h('label', { class: 'search-field' }, icon('search'), searchInput),
       tabs,
     ),
+    banner,
     controls,
     list,
   );
 
   function set(change: Partial<Query>): void {
     Object.assign(query, change);
+    limit = PAGE_SIZE;
     render();
+  }
+
+  /** Says whose library this is and, if one is being imported, how far along it is. */
+  function renderBanner(): void {
+    const status = store.status;
+    const counts = status?.counts;
+    const kind = !status
+      ? 'demo'
+      : store.showing === 'demo'
+        ? 'demo-shown'
+        : counts!.remaining > 0 || counts!.failed > 0 || counts!.needsReview > 0
+          ? 'progress'
+          : 'none';
+    // Rebuilt only when it says something of a different kind; from one lookup to the next only
+    // the words change, and the button beside them stays put so that it can be pressed.
+    if (kind !== shownBanner) {
+      shownBanner = kind;
+      banner.hidden = kind === 'none';
+      setChildren(
+        banner,
+        kind === 'demo'
+          ? [h('span', null, 'This is a demo library, not yours.'), h('a', { class: 'button text', href: links.import }, 'Import your own')]
+          : kind === 'demo-shown'
+            ? [
+                h('span', null, 'This is the demo library.'),
+                h('button', { class: 'button text', type: 'button', onClick: () => app.showLibrary('mine') }, 'Show yours'),
+              ]
+            : kind === 'progress'
+              ? [h('span', { class: 'banner-progress' }), h('a', { class: 'button text', href: links.import }, 'Details')]
+              : null,
+      );
+    }
+    if (kind === 'progress') {
+      banner.querySelector('.banner-progress')!.textContent =
+        counts!.remaining > 0
+          ? describeProgress(status!)
+          : [counts!.needsReview > 0 ? `${counts!.needsReview} to review` : null, counts!.failed > 0 ? plural(counts!.failed, 'failed lookup') : null]
+              .filter(Boolean)
+              .join(' · ');
+    }
   }
 
   function select<T extends string>(label: string, value: T, options: [T, string][], onChange: (value: T) => void): HTMLElement {
@@ -88,8 +151,9 @@ export function createLibraryPage(app: App): Page {
     const items = store.snapshot.data.items;
     const excluded = items.filter((item) => !item.included).length;
     summary.textContent =
-      `${works(items.filter((i) => i.kind === 'SONG').length, items.filter((i) => i.kind === 'ALBUM').length)} in a demo library` +
+      `${works(items.filter((i) => i.kind === 'SONG').length, items.filter((i) => i.kind === 'ALBUM').length)} in ${libraryPhrase(store.showing)}` +
       (excluded > 0 ? ` · ${excluded} excluded from analysis` : '');
+    renderBanner();
 
     const tab = (id: Tab, label: string) =>
       h('button', { type: 'button', role: 'tab', 'aria-selected': String(query.tab === id), onClick: () => set({ tab: id, artist: null }) }, label);
@@ -97,25 +161,36 @@ export function createLibraryPage(app: App): Page {
 
     const decades = [...new Set(items.map(decadeOf).filter((d) => d !== null))].sort((a, b) => b - a);
     const listsWorks = query.tab !== 'artists' || query.artist !== null;
-    setChildren(
-      controls,
-      query.artist !== null ? chip(`← All artists`, false, () => set({ artist: null })) : null,
-      listsWorks
-        ? select<Sort>('Sort by', query.sort, [['title', 'Sort: Title'], ['artist', 'Sort: Artist'], ['year', 'Sort: Newest']], (sort) => set({ sort }))
-        : null,
-      select<Status>(
-        'Match status',
-        query.status,
-        (Object.keys(STATUSES) as Status[]).map((key) => [key, STATUSES[key].label]),
-        (status) => set({ status }),
-      ),
-      select<string>(
-        'Decade',
-        String(query.decade ?? ''),
-        [['', 'Any decade'], ...decades.map((d): [string, string] => [String(d), `${d}s`])],
-        (decade) => set({ decade: decade === '' ? null : Number(decade) }),
-      ),
-    );
+    // Only the statuses that occur are offered, plus the one in use.
+    const statuses = (Object.keys(STATUSES) as Status[]).filter((key) => key === 'all' || key === query.status || items.some(STATUSES[key].accepts));
+    const sorts: [Sort, string][] = [['title', 'Sort: Title'], ['artist', 'Sort: Artist'], ['year', 'Sort: Newest']];
+    if (query.sort === 'recent' || items.some((item) => item.addedAt !== undefined)) sorts.push(['recent', 'Sort: Recently added']);
+
+    // The controls are rebuilt only when they would come out different, so that a menu the user
+    // has open is not closed by a redraw while songs are being looked up.
+    const signature = JSON.stringify([query, decades, statuses, sorts.length]);
+    if (signature !== shownControls) {
+      shownControls = signature;
+      setChildren(
+        controls,
+        query.artist !== null ? chip(`← All artists`, false, () => set({ artist: null })) : null,
+        listsWorks ? select<Sort>('Sort by', query.sort, sorts, (sort) => set({ sort })) : null,
+        select<Status>(
+          'Match status',
+          query.status,
+          statuses.map((key) => [key, STATUSES[key].label]),
+          (status) => set({ status }),
+        ),
+        decades.length > 0
+          ? select<string>(
+              'Decade',
+              String(query.decade ?? ''),
+              [['', 'Any decade'], ...decades.map((d): [string, string] => [String(d), `${d}s`])],
+              (decade) => set({ decade: decade === '' ? null : Number(decade) }),
+            )
+          : null,
+      );
+    }
     renderList();
   }
 
@@ -129,14 +204,17 @@ export function createLibraryPage(app: App): Page {
       const groups = new Map<string, LibraryItem[]>();
       for (const item of items.filter(passesFilters)) {
         if (text !== '' && !lower(item.artist).includes(text)) continue;
-        groups.set(item.artist, [...(groups.get(item.artist) ?? []), item]);
+        const group = groups.get(item.artist);
+        if (group) group.push(item);
+        else groups.set(item.artist, [item]);
       }
       const names = [...groups.keys()].sort((a, b) => compareText(lower(a), lower(b)));
+      shownRows = [];
       setChildren(
         list,
         names.length === 0
           ? nothing(text !== '' || filtered)
-          : names.map((name) => {
+          : names.slice(0, limit).map((name) => {
               const of = groups.get(name)!;
               return row({
                 title: name,
@@ -149,6 +227,7 @@ export function createLibraryPage(app: App): Page {
                 },
               });
             }),
+        more(names.length),
       );
       return;
     }
@@ -162,18 +241,28 @@ export function createLibraryPage(app: App): Page {
       artist: (a, b) => compareText(lower(a.artist), lower(b.artist)) || byTitle(a, b),
       // Unknown years sort last rather than pretending to be year zero.
       year: (a, b) => (b.year ?? -Infinity) - (a.year ?? -Infinity) || byTitle(a, b),
+      recent: (a, b) => (b.addedAt ?? -Infinity) - (a.addedAt ?? -Infinity) || byTitle(a, b),
     };
-    const shown = scoped
+    const matching = scoped
       .filter((item) => passesFilters(item) && (text === '' || [item.title, item.artist, item.album ?? ''].some((field) => lower(field).includes(text))))
       .sort(order[query.sort]);
+    const shown = matching.slice(0, limit);
+    const onMapIds = new Set<string>();
+    for (const node of store.snapshot.graph.nodes) for (const id of node.itemIds) onMapIds.add(id);
+
+    // While songs are being looked up the page is asked to redraw every few seconds. Rows are
+    // left alone unless something about them changed, so a press that is under way still lands.
+    const rows: unknown[] = [JSON.stringify(query), matching.length, ...shown.flatMap((item) => [item, onMapIds.has(item.id)])];
+    if (rows.length === shownRows.length && rows.every((value, i) => value === shownRows[i])) return;
+    shownRows = rows;
 
     setChildren(
       list,
-      query.artist !== null ? h('div', { class: 'section-header' }, h('h2', null, query.artist), h('p', null, plural(shown.length, 'work'))) : null,
+      query.artist !== null ? h('div', { class: 'section-header' }, h('h2', null, query.artist), h('p', null, plural(matching.length, 'work'))) : null,
       shown.length === 0
         ? nothing(text !== '' || filtered)
         : shown.map((item) => {
-            const onMap = store.snapshot.graph.nodes.some((node) => node.itemIds.includes(item.id));
+            const onMap = onMapIds.has(item.id);
             return workRow(item, {
               status: { ...matchStatus(item), showLabel: false },
               onClick: () => app.navigate(links.work(item.id)),
@@ -191,6 +280,29 @@ export function createLibraryPage(app: App): Page {
                 ]),
             });
           }),
+      more(matching.length),
+    );
+  }
+
+  /** The button under a list that is longer than what is drawn. */
+  function more(total: number): HTMLElement | null {
+    if (total <= limit) return null;
+    return h(
+      'div',
+      { class: 'list-more' },
+      h('span', { class: 'caption' }, `Showing ${limit.toLocaleString('en')} of ${total.toLocaleString('en')}`),
+      h(
+        'button',
+        {
+          class: 'button tonal',
+          type: 'button',
+          onClick: () => {
+            limit += PAGE_SIZE;
+            renderList();
+          },
+        },
+        'Show more',
+      ),
     );
   }
 
@@ -218,5 +330,5 @@ export function createLibraryPage(app: App): Page {
   }
 
   render();
-  return { element, update: render };
+  return { element, update: render, onProgress: renderBanner };
 }

@@ -1,5 +1,6 @@
 import type { Selection } from '../graph/universeView';
-import type { Store } from '../state/store';
+import type { ImportedSong } from '../import/appleLibrary';
+import type { Showing, Store } from '../state/store';
 
 /** Where the user is. Every screen is reachable by its address, so links and Back work. */
 export type Route =
@@ -8,6 +9,7 @@ export type Route =
   | { page: 'insights' }
   | { page: 'share' }
   | { page: 'about' }
+  | { page: 'import' }
   | { page: 'work'; id: string }
   | { page: 'creator'; id: string };
 
@@ -22,6 +24,12 @@ export interface App {
   resetLayout(): void;
   /** Undoes everything the visitor changed: exclusions, nickname, filter and layout. */
   clearLocalData(): void;
+  /** Replaces the imported library with these songs and starts looking them up. */
+  importLibrary(songs: ImportedSong[], source: { fileName: string; choice: string }): void;
+  /** Switches between the sample library and the imported one. */
+  showLibrary(which: Showing): void;
+  /** Removes the imported library from this browser. */
+  deleteLibrary(): void;
 }
 
 /** A screen shown in the reading column. */
@@ -29,6 +37,8 @@ export interface Page {
   element: HTMLElement;
   /** Called when the library, the graph or the filter changed while the page is showing. */
   update?(): void;
+  /** Called when the state of the import changed, which while songs are looked up is every second or two. */
+  onProgress?(): void;
 }
 
 export const links = {
@@ -37,6 +47,7 @@ export const links = {
   insights: '#/insights',
   share: '#/share',
   about: '#/about',
+  import: '#/import',
   work: (id: string) => `#/work/${encodeURIComponent(id)}`,
   creator: (id: string) => `#/creator/${encodeURIComponent(id)}`,
   /** The map, moved to and spotlighting something. */
@@ -53,6 +64,7 @@ export function parseRoute(hash: string): Route {
     case 'insights':
     case 'share':
     case 'about':
+    case 'import':
       return { page };
     case 'work':
     case 'creator':

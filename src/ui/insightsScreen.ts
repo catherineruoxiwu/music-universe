@@ -2,7 +2,7 @@ import type { Distribution } from '../insights/engine';
 import type { AnalysisData } from '../model/data';
 import { GRAPHED, ordinal, roleName, rolePlural, type Role } from '../model/types';
 import { links, type App, type Page } from './app';
-import { ROLE_COLORS, STATUS_COLORS, barChart, initialOf, percent, plural, row, sectionHeader, type Bar } from './describe';
+import { ROLE_COLORS, STATUS_COLORS, barChart, initialOf, libraryPhrase, percent, plural, row, sectionHeader, type Bar } from './describe';
 import { chip, h, setChildren } from './dom';
 
 const MAX_TITLES = 3;
@@ -61,7 +61,7 @@ export function createInsightsPage(app: App): Page {
       );
       return;
     }
-    subtitle.textContent = `Based on ${plural(coverage.total, 'work')} in a demo library`;
+    subtitle.textContent = `Based on ${plural(coverage.total, 'work')} in ${libraryPhrase(store.showing)}`;
 
     // --- coverage ---------------------------------------------------------------------------------
     const share = (label: string, value: number, color: string): Bar => ({

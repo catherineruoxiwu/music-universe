@@ -3,7 +3,7 @@ import { groupBy } from '../model/data';
 import { GENRE_LEVELS, ROLES, isGraphed, roleName, rolePlural, type GenreLevel, type LibraryItem, type Role } from '../model/types';
 import { links, type App, type Page } from './app';
 import { ROLE_COLORS, creatorRow, creditsOn, initialOf, itemSubtitle, matchStatus, plural, row, scope, sectionHeader, workRow } from './describe';
-import { h, icon, iconButton, setChildren } from './dom';
+import { h, icon, iconButton, setChildren, toast } from './dom';
 
 const lower = (text: string) => text.toLowerCase();
 
@@ -18,6 +18,7 @@ const METHODS: Record<string, string> = {
   isrc: 'by ISRC',
   barcode: 'by barcode',
   search: 'by title, artist and length',
+  user: 'as confirmed by you',
 };
 
 function header(app: App, title: string, fallback: string): HTMLElement {
@@ -43,7 +44,7 @@ function describeMatch(item: LibraryItem): string {
     case 'PENDING':
       return 'Waiting to be looked up on MusicBrainz.';
     case 'FAILED':
-      return 'The lookup didn’t complete. Nothing was assumed.';
+      return `The lookup didn’t complete${item.lastError ? ` (${item.lastError})` : ''}. Nothing was assumed.`;
     case 'UNMATCHED':
       return 'No confident match on MusicBrainz. This work stays in the library without credits and isn’t part of the Universe.';
     case 'LOW_CONFIDENCE':
@@ -53,7 +54,7 @@ function describeMatch(item: LibraryItem): string {
         case 'EMPTY':
           return `Matched to ${matchedTo}. MusicBrainz lists no producer, songwriter or musician credits for it yet. That doesn’t mean nobody was involved.`;
         case 'FAILED':
-          return 'The lookup didn’t complete. Nothing was assumed.';
+          return `Matched to ${matchedTo}, but reading its credits didn’t complete${item.lastError ? ` (${item.lastError})` : ''}. Nothing was assumed.`;
         case 'NOT_QUERIED':
           return 'Waiting to be looked up on MusicBrainz.';
         case 'FETCHED':
@@ -74,12 +75,25 @@ export function createWorkPage(app: App, id: string): Page {
   const kind = store.snapshot.data.itemsById.get(id)!.kind === 'SONG' ? 'Song' : 'Album';
   const element = h('div', { class: 'page' }, header(app, kind, links.library), body);
 
+  let shown: unknown[] = [];
+
   function render(): void {
     const { data, graph } = store.snapshot;
-    const item = data.itemsById.get(id)!;
+    const item = data.itemsById.get(id);
+    // The library on show was switched or deleted while this page was open.
+    if (!item) {
+      setChildren(body, h('div', { class: 'empty-state' }, h('h2', null, 'This work isn’t in the library on show'), h('a', { class: 'button filled', href: links.library }, 'Open Library')));
+      return;
+    }
     const credits = data.creditsByItem.get(id) ?? [];
     const status = matchStatus(item);
     const onMap = graph.nodes.some((node) => node.itemIds.includes(id));
+
+    // While other songs are being looked up this is asked to redraw every few seconds; nothing
+    // here changes unless this work did.
+    const state = [item, credits.length, onMap];
+    if (state.every((value, i) => value === shown[i])) return;
+    shown = state;
 
     const include = h('input', { type: 'checkbox', role: 'switch', class: 'switch', checked: item.included });
     include.addEventListener('change', () => store.setIncluded(id, include.checked));
@@ -138,6 +152,7 @@ export function createWorkPage(app: App, id: string): Page {
         { class: 'card' },
         h('p', { class: 'status-line' }, h('span', { class: 'dot', style: { '--dot': status.color } }), h('strong', null, status.label)),
         h('p', { class: 'caption' }, describeMatch(item)),
+        lookupActions(item),
         h(
           'label',
           { class: 'switch-row' },
@@ -157,6 +172,41 @@ export function createWorkPage(app: App, id: string): Page {
     );
   }
 
+  /** What the user can do about this work's lookup. Only an imported library is looked up from here. */
+  function lookupActions(item: LibraryItem): HTMLElement | null {
+    if (store.showing !== 'mine') return null;
+    const button = (label: string, style: string, onClick: () => void) => h('button', { class: `button ${style}`, type: 'button', onClick }, label);
+    const again = (label: string, style = 'text') =>
+      button(label, style, () => {
+        store.retry(id);
+        toast('Looking it up again…');
+      });
+    switch (item.matchStatus) {
+      case 'PENDING':
+        return null;
+      case 'LOW_CONFIDENCE':
+        return h(
+          'div',
+          { class: 'button-row' },
+          button('Yes, that’s it', 'filled', () => {
+            store.confirmMatch(id);
+            toast('Match confirmed. Reading its credits…');
+          }),
+          button('Not the same song', 'tonal', () => store.rejectMatch(id)),
+          item.recordingMbid
+            ? h('a', { class: 'button text', href: `https://musicbrainz.org/recording/${item.recordingMbid}`, target: '_blank', rel: 'noopener noreferrer' }, 'Check on MusicBrainz')
+            : null,
+        );
+      case 'FAILED':
+        return h('div', { class: 'button-row' }, again('Try again', 'tonal'));
+      case 'UNMATCHED':
+        return h('div', { class: 'button-row' }, again('Look up again'));
+      case 'MATCHED':
+        if (item.creditsStatus === 'NOT_QUERIED') return null;
+        return h('div', { class: 'button-row' }, again(item.creditsStatus === 'FAILED' ? 'Try again' : 'Look up again', item.creditsStatus === 'FAILED' ? 'tonal' : 'text'));
+    }
+  }
+
   render();
   return { element, update: render };
 }
@@ -171,7 +221,12 @@ export function createCreatorPage(app: App, id: string): Page {
 
   function render(): void {
     const { data, graph } = store.snapshot;
-    const creator = data.creators.get(id)!;
+    const creator = data.creators.get(id);
+    // The library on show was switched or deleted while this page was open.
+    if (!creator) {
+      setChildren(body, h('div', { class: 'empty-state' }, h('h2', null, 'This person isn’t in the library on show'), h('a', { class: 'button filled', href: links.universe }, 'Open Universe')));
+      return;
+    }
     const index = graph.indexOf(id);
     const node = index >= 0 ? graph.nodes[index] : null;
     const credits = data.creditsByCreator.get(id) ?? [];

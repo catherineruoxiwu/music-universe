@@ -130,8 +130,9 @@ export class UniverseView {
     this.updateScaleLimits();
     if (firstContent) this.framed = false;
     this.frameIfNeeded();
-    // A layout still in motion would otherwise drift out of a viewpoint chosen for its first frame.
-    if (this.following && this.framed) this.resetView(false);
+    // A layout still in motion, or a library still growing, would otherwise drift out of a
+    // viewpoint chosen for its first frame. A view the user has moved is left where they put it.
+    if ((this.following || this.fitted) && this.framed) this.resetView(false);
     if (value.settled) this.following = false;
     this.invalidate();
   }

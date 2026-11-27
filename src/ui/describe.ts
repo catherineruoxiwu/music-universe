@@ -2,6 +2,7 @@ import type { GraphFilter, GraphNode } from '../graph/graph';
 import { SCREEN_STYLE } from '../graph/theme';
 import type { AnalysisData } from '../model/data';
 import { ROLES, rolePlural, type Credit, type LibraryItem } from '../model/types';
+import type { ImportStatus, Showing } from '../state/store';
 import { h, iconButton } from './dom';
 
 // Turns stored data into the short phrases shown in lists. Kept in one place for consistency.
@@ -12,6 +13,39 @@ export const STATUS_COLORS = { ok: '#63D6A0', pending: '#A9A1BD', warn: '#F4B76A
 
 export function plural(count: number, one: string, many = one + 's'): string {
   return `${count} ${count === 1 ? one : many}`;
+}
+
+/** "a demo library" or "your library", for sentences that say whose music is on show. */
+export const libraryPhrase = (showing: Showing): string => (showing === 'mine' ? 'your library' : 'a demo library');
+
+/** "about 2 hours", "about 5 minutes", "under a minute" */
+export function duration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 1) return 'under a minute';
+  if (minutes < 60) return `about ${plural(minutes, 'minute')}`;
+  const hours = Math.floor(minutes / 60);
+  const rest = Math.round((minutes % 60) / 5) * 5;
+  if (rest === 60) return `about ${plural(hours + 1, 'hour')}`;
+  return `about ${plural(hours, 'hour')}` + (rest > 0 && hours < 10 ? ` ${rest} min` : '');
+}
+
+/** What the lookups of an imported library are doing, in a sentence. */
+export function describeProgress(status: ImportStatus): string {
+  const { counts, state } = status;
+  const count = (value: number) => value.toLocaleString('en');
+  const total = `${count(counts.total)} ${counts.total === 1 ? 'song' : 'songs'}`;
+  if (counts.remaining === 0) return `All ${total} looked up`;
+  const progress = `${count(counts.total - counts.remaining)} of ${total} looked up`;
+  switch (state) {
+    case 'running':
+      return `${progress} · ${duration(status.etaMs)} left`;
+    case 'offline':
+      return `${progress} · can’t reach MusicBrainz`;
+    case 'elsewhere':
+      return `${progress} · continuing in another tab`;
+    case 'idle':
+      return `${progress} · paused`;
+  }
 }
 
 export const percent = (value: number, of: number): number => (of === 0 ? 0 : Math.round((value * 100) / of));

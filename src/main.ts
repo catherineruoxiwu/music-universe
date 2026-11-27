@@ -3,13 +3,16 @@ import { Store } from './state/store';
 import { createAboutPage } from './ui/aboutScreen';
 import { links, parseRoute, type App, type Page, type Route } from './ui/app';
 import { createCreatorPage, createWorkPage } from './ui/detailScreens';
-import { h, icon, type IconName } from './ui/dom';
+import { describeProgress } from './ui/describe';
+import { betweenPresses, h, icon, type IconName } from './ui/dom';
+import { createImportPage } from './ui/importScreen';
 import { createInsightsPage } from './ui/insightsScreen';
 import { createLibraryPage } from './ui/libraryScreen';
 import { createSharePage } from './ui/shareScreen';
 import { createUniverseScreen } from './ui/universeScreen';
 
-const store = new Store();
+// What this browser has stored is read first, so that the first thing drawn is the right library.
+const store = await Store.open();
 
 // --- history ----------------------------------------------------------------------------------------
 // Each history entry is numbered, which tells a fresh navigation (start at the top) from a return
@@ -40,6 +43,19 @@ const app: App = {
     universe.followLayout();
     store.clearLocalData();
   },
+  importLibrary(songs, source) {
+    universe.followLayout();
+    store.importLibrary(songs, source);
+  },
+  showLibrary(which) {
+    if (which === store.showing) return;
+    universe.followLayout();
+    store.show(which);
+  },
+  deleteLibrary() {
+    universe.followLayout();
+    store.deleteMine();
+  },
 };
 
 // --- shell ------------------------------------------------------------------------------------------
@@ -53,6 +69,25 @@ const TABS: { name: string; icon: IconName; href: string; pages: Route['page'][]
 
 const tabLinks = TABS.map((tab) => h('a', { class: 'nav-link', href: tab.href, title: tab.name }, icon(tab.icon), h('span', null, tab.name)));
 const universe = createUniverseScreen(app);
+
+// Under the tabs: whose library is on show, and how far along an import is.
+const libraryTitle = h('strong');
+const libraryNote = h('span');
+const libraryLink = h('a', { class: 'nav-library', href: links.import }, icon('import'), h('span', { class: 'nav-library-text' }, libraryTitle, libraryNote));
+
+function renderLibraryLink(): void {
+  const status = store.status;
+  libraryTitle.textContent = !status ? 'Import your library' : store.showing === 'mine' ? 'Your library' : 'Demo library';
+  libraryNote.textContent = !status
+    ? 'Now showing a demo library'
+    : status.counts.remaining > 0
+      ? describeProgress(status)
+      : store.showing === 'mine'
+        ? `${status.counts.total.toLocaleString('en')} songs · credits from MusicBrainz`
+        : 'Yours is ready to show';
+  libraryLink.title = `${libraryTitle.textContent}: ${libraryNote.textContent}`;
+  libraryLink.classList.toggle('busy', status?.state === 'running');
+}
 const pageHost = h('div', { class: 'page-host', hidden: true });
 const main = h('main', { class: 'main', tabindex: '-1' }, universe.element, pageHost);
 
@@ -62,7 +97,7 @@ document.getElementById('app')!.replaceChildren(
     { class: 'nav', 'aria-label': 'Main' },
     h('a', { class: 'brand', href: links.universe, 'aria-label': 'Music Universe' }, icon('universe'), h('span', null, 'Music Universe')),
     tabLinks,
-    h('p', { class: 'nav-note' }, 'A demo library, with credits from MusicBrainz'),
+    libraryLink,
   ),
   main,
 );
@@ -83,6 +118,8 @@ function createPage(target: Route): Page | null {
       return createSharePage(app);
     case 'about':
       return createAboutPage(app);
+    case 'import':
+      return createImportPage(app);
     case 'work':
       return createWorkPage(app, target.id);
     case 'creator':
@@ -96,6 +133,7 @@ const TITLES: Record<Route['page'], string> = {
   insights: 'Insights · Music Universe',
   share: 'Share Studio · Music Universe',
   about: 'About · Music Universe',
+  import: 'Your library · Music Universe',
   work: 'Credits · Music Universe',
   creator: 'Creator · Music Universe',
 };
@@ -119,6 +157,8 @@ function showRoute(): void {
     if (tab.pages.includes(route.page)) tabLinks[i].setAttribute('aria-current', 'page');
     else tabLinks[i].removeAttribute('aria-current');
   });
+  if (route.page === 'import') libraryLink.setAttribute('aria-current', 'page');
+  else libraryLink.removeAttribute('aria-current');
   document.title = TITLES[route.page];
   window.scrollTo(0, scrollTo);
 
@@ -136,10 +176,16 @@ window.addEventListener('keydown', (event) => {
 
 // Pages are redrawn when the library or the filter changes, not on every step of a settling layout.
 let shownGeneration = store.snapshot.generation;
+const updatePage = () => page?.update?.();
 store.subscribe(() => {
   if (store.snapshot.generation === shownGeneration) return;
   shownGeneration = store.snapshot.generation;
-  page?.update?.();
+  betweenPresses(updatePage);
 });
+store.subscribeProgress(() => {
+  renderLibraryLink();
+  page?.onProgress?.();
+});
+renderLibraryLink();
 
 showRoute();
